@@ -13,12 +13,14 @@ from hdx.data.user import User
 from hdx.facades.infer_arguments import facade
 from hdx.utilities.downloader import Download
 from hdx.utilities.path import (
+    progress_storing_folder,
     script_dir_plus_file,
     wheretostart_tempdir_batch,
 )
 from hdx.utilities.retriever import Retrieve
 
 from hdx.scraper.ctrees._version import __version__
+from hdx.scraper.ctrees.boundaries import download_admin1_boundaries, get_country_bbox
 from hdx.scraper.ctrees.pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
@@ -57,21 +59,34 @@ def main(
                 use_saved=use_saved,
             )
             pipeline = Pipeline(configuration, retriever, tempdir)
-            pipeline.get_data()
+            year = configuration["latest_year"]
 
-            dataset = pipeline.generate_dataset()
-            if dataset:
-                dataset.update_from_yaml(
-                    script_dir_plus_file(
-                        join("config", "hdx_dataset_static.yaml"), main
-                    )
-                )
-                dataset.create_in_hdx(
-                    remove_additional_resources=True,
-                    match_resource_order=False,
-                    updated_by_script=_UPDATED_BY_SCRIPT,
-                    batch=info["batch"],
-                )
+            countries = [{"iso3": iso3} for iso3 in pipeline.get_data_grid_countries()]
+            boundaries_path = download_admin1_boundaries(
+                retriever, configuration, tempdir
+            )
+
+            for _, nextdict in progress_storing_folder(info, countries, "iso3"):
+                iso3 = nextdict["iso3"]
+                try:
+                    bbox = get_country_bbox(boundaries_path, iso3)
+                    tif_path = pipeline.get_country_raster(iso3, bbox, year)
+                    dataset = pipeline.generate_dataset(iso3, tif_path, year)
+                    if dataset:
+                        dataset.update_from_yaml(
+                            script_dir_plus_file(
+                                join("config", "hdx_dataset_static.yaml"), main
+                            )
+                        )
+                        dataset.create_in_hdx(
+                            remove_additional_resources=True,
+                            match_resource_order=False,
+                            updated_by_script=_UPDATED_BY_SCRIPT,
+                            batch=info["batch"],
+                        )
+                except Exception:
+                    logger.exception(f"Failed to process {iso3}, skipping")
+                    continue
 
 
 if __name__ == "__main__":

@@ -1,18 +1,20 @@
 from os.path import join
 
+import pytest
+import rasterio
 from hdx.utilities.downloader import Download
 from hdx.utilities.path import temp_dir
 from hdx.utilities.retriever import Retrieve
+from rasterio.io import MemoryFile
 
+import hdx.scraper.ctrees.pipeline as pipeline_module
 from hdx.scraper.ctrees.pipeline import Pipeline
 
 
 class TestPipeline:
-    def test_pipeline(self, configuration, fixtures_dir, input_dir, config_dir):
+    def test_get_data_grid_countries(self, configuration, input_dir):
         with temp_dir(
-            "TestCtrees",
-            delete_on_success=True,
-            delete_on_failure=False,
+            "TestCtreesDataGrid", delete_on_success=True, delete_on_failure=False
         ) as tempdir:
             with Download(user_agent="test") as downloader:
                 retriever = Retrieve(
@@ -24,7 +26,75 @@ class TestPipeline:
                     use_saved=True,
                 )
                 pipeline = Pipeline(configuration, retriever, tempdir)
-                dataset = pipeline.generate_dataset()
-                dataset.update_from_yaml(
-                    path=join(config_dir, "hdx_dataset_static.yaml")
-                )
+                countries = pipeline.get_data_grid_countries()
+
+        # excludes "syr" (inactive) and "world" (not a 3-letter country group)
+        assert countries == ["afg", "lbn"]
+
+    def test_get_country_raster(self, monkeypatch, configuration, input_dir):
+        fixture_path = join(input_dir, "agb_lbn_2025.tif")
+        real_open = rasterio.open
+
+        # The real S3 COG carries no GDAL NoData tag at all (confirmed via gdalinfo), unlike
+        # this fixture (captured via rioxarray, which does set one) -- strip it here so the
+        # mock matches the real source. Without this, a regression to reading src.nodata
+        # instead of the configured agb_fill_value would pass against the fixture but silently
+        # leak -9999 sentinel values through against the real source (see HDXPIPE-100 analysis).
+        with real_open(fixture_path) as fixture_src:
+            data = fixture_src.read(1)
+            profile = fixture_src.profile.copy()
+            bbox = tuple(fixture_src.bounds)
+        profile["nodata"] = None
+
+        memfile = MemoryFile()
+        with memfile.open(**profile) as mem_src:
+            mem_src.write(data, 1)
+
+        def fake_open(path, *args, **kwargs):
+            if isinstance(path, str) and path.startswith("/vsicurl/"):
+                return memfile.open()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(pipeline_module.rasterio, "open", fake_open)
+
+        with temp_dir(
+            "TestCtreesRaster", delete_on_success=True, delete_on_failure=False
+        ) as tempdir:
+            pipeline = Pipeline(configuration, retriever=None, tempdir=tempdir)
+            out_path = pipeline.get_country_raster("lbn", bbox, 2025)
+
+            with real_open(out_path) as out_src:
+                data = out_src.read(1)
+                assert data.shape[0] > 0
+                assert data.shape[1] > 0
+                assert out_src.dtypes[0] == "int16"
+                # raw fixture range is 0-3870 (already x10-scaled, stored undivided)
+                assert data.max() == pytest.approx(3870, rel=0.01)
+                assert data.min() == 0
+                # fill value is tagged as nodata (rather than divided/converted to nan), so
+                # readers that respect the nodata tag mask it correctly
+                assert out_src.nodata == -9999
+                # scale/offset band tags record how to recover true Mg/ha (raw / 10)
+                assert out_src.scales[0] == pytest.approx(0.1)
+                assert out_src.offsets[0] == pytest.approx(0.0)
+
+    def test_generate_dataset(self, configuration, input_dir, config_dir):
+        tif_path = join(input_dir, "agb_lbn_2025.tif")
+        pipeline = Pipeline(configuration, retriever=None, tempdir=input_dir)
+        dataset = pipeline.generate_dataset("lbn", tif_path, 2025)
+
+        assert dataset["name"] == "lbn-ctrees-aboveground-biomass"
+        assert dataset["title"] == "Lebanon - CTrees Aboveground Biomass"
+
+        dataset.update_from_yaml(path=join(config_dir, "hdx_dataset_static.yaml"))
+        assert dataset["owner_org"] == "hdx"
+
+        resources = dataset.get_resources()
+        assert len(resources) == 1
+        assert resources[0]["name"] == "lbn_ctrees_aboveground_biomass.tif"
+
+    def test_generate_dataset_unknown_country(self, configuration, input_dir):
+        tif_path = join(input_dir, "agb_lbn_2025.tif")
+        pipeline = Pipeline(configuration, retriever=None, tempdir=input_dir)
+        dataset = pipeline.generate_dataset("zzz", tif_path, 2025)
+        assert dataset is None

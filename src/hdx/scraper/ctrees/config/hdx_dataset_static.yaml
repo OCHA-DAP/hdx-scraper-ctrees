@@ -1,10 +1,28 @@
 license_id: cc-by
+
 methodology: Other
-caveats:
-dataset_source:
+methodology_other: Placeholder
+caveats: |
+  Pixel values are the source's native int16 representation, scaled x10 (raw value / 10 = true
+  Mg/ha). This scale factor is recorded in each resource's GeoTIFF band metadata (Scale/Offset
+  tags), but most plain script-based reads (e.g. a bare rasterio `.read()` or GDAL
+  `ReadAsArray()` call) do not apply it automatically and will return values 10x too high unless
+  you divide by 10 (or apply the Scale tag) yourself.
+dataset_source: CTrees
 package_creator: HDX Data Systems Team
 private: False
-maintainer:
-owner_org:
-data_update_frequency:
-notes:
+maintainer: 196196be-6037-4488-8b71-d786adf4c081
+owner_org: hdx
+data_update_frequency: 365
+notes: |
+  This dataset contains annual, 100m-resolution above ground biomass (AGB) estimates from CTrees,
+  a NASA-affiliated forest-carbon monitoring organization, clipped to this country's boundary from
+  CTrees' global AGB raster.
+
+  Pixel values are stored as int16, scaled x10 relative to the true value in megagrams per
+  hectare (Mg/ha) -- divide by 10 to get Mg/ha. See the caveats field and resource description
+  for details on how this scale factor is recorded and why it isn't applied automatically by most
+  tools.
+
+  Interim metadata: organization, license, and methodology are placeholders pending CTrees/DPT
+  completing the HDX metadata form.

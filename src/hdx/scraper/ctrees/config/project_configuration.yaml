@@ -1,2 +1,22 @@
 # Collector specific configuration
-abg_url: "ctrees/aboveground_biomass_100m_global_open"
+
+# Public AWS Open Data S3 mirror of CTrees' annual global AGB COGs (no auth required)
+agb_cog_url_template: "https://ctrees-agb-100m-global.s3.amazonaws.com/cogs/global_agb_100m_landsat0024_all_{year}_densenet_l1_agb_mosaic_100m_base_cd_ts.tif"
+# agb/uncertainty pixel values are scaled by this factor; divide to get true Mg/ha
+agb_scale_factor: 10
+# Fill/nodata sentinel value in the source data. The public S3 COG mirror carries no GDAL NoData
+# tag of its own (confirmed via gdalinfo), so this can't be read from the file -- it comes from
+# the equivalent Zarr source's documented _FillValue attribute instead.
+agb_fill_value: -9999
+# Latest year available in the source as of this build; backfill is latest-year-only for now
+latest_year: 2025
+
+# HDX dataset providing country admin boundaries, used to derive per-country clip bounding boxes
+cod_ab_global_dataset_id: "cod-ab-global"
+cod_ab_global_resource_name: "global_admin_boundaries_matched_latest.gdb.zip"
+
+dataset_title_suffix: "CTrees Aboveground Biomass"
+tags:
+  - "climate-weather"
+  - "environment"
+  - "geodata"

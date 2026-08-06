@@ -1,0 +1,45 @@
+{
+  "help": "https://data.humdata.org/api/3/action/help_show?name=group_list",
+  "success": true,
+  "result": [
+    {
+      "id": "afg",
+      "name": "afg",
+      "display_name": "Afghanistan",
+      "title": "Afghanistan",
+      "type": "group",
+      "state": "active",
+      "data_completeness": "active",
+      "package_count": 400
+    },
+    {
+      "id": "lbn",
+      "name": "lbn",
+      "display_name": "Lebanon",
+      "title": "Lebanon",
+      "type": "group",
+      "state": "active",
+      "data_completeness": "active",
+      "package_count": 120
+    },
+    {
+      "id": "syr",
+      "name": "syr",
+      "display_name": "Syrian Arab Republic",
+      "title": "Syrian Arab Republic",
+      "type": "group",
+      "state": "active",
+      "data_completeness": "inactive",
+      "package_count": 300
+    },
+    {
+      "id": "world",
+      "name": "world",
+      "display_name": "World",
+      "title": "World",
+      "type": "group",
+      "state": "active",
+      "package_count": 834
+    }
+  ]
+}

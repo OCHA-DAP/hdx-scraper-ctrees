@@ -3,7 +3,22 @@
 [![Coverage Status](https://coveralls.io/repos/github/OCHA-DAP/hdx-scraper-ctrees/badge.svg?branch=main&ts=1)](https://coveralls.io/github/OCHA-DAP/hdx-scraper-ctrees?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-This script ...
+This pipeline publishes annual, 100m-resolution Aboveground Biomass (AGB) data from
+[CTrees](https://ctrees.org), a NASA-affiliated forest-carbon monitoring organization, as one HDX
+dataset per HDX Data Grid country.
+
+The source is CTrees' global AGB raster, mirrored as public (no-auth) Cloud-Optimized GeoTIFFs
+(COGs) in an AWS Open Data S3 bucket, one file per year. For each active HDX Data Grid country, the
+pipeline:
+
+1. Looks up the country's admin1 bounding box from HDX's own
+   [`cod-ab-global`](https://data.humdata.org/dataset/cod-ab-global) boundaries dataset.
+2. Reads a windowed slice of the global AGB COG for that bounding box (via GDAL's `/vsicurl/`
+   streaming, so only the relevant byte ranges are fetched, not the whole ~38GB file).
+3. Writes the clipped slice out as a per-country COG and uploads it as a GeoTIFF resource.
+
+Initial build scope: latest year only (2025), AGB only (CTrees' separate Land Use Change Alerts
+product is out of scope). See `HDXPIPE-100-ctrees-analysis.md` for the full design rationale.
 
 ## Development
 

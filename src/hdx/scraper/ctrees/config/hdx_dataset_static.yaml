@@ -1,7 +1,23 @@
 license_id: cc-by
 
 methodology: Other
-methodology_other: Placeholder
+methodology_other: |
+  CTrees produces its aboveground biomass (AGB) estimates by combining light detection and
+  ranging (LiDAR) measurements from NASA's ICESat and GEDI satellites -- which provide a global
+  dataset of vegetation structure and aboveground live biomass, calibrated against more than 1.5
+  million ground plot data points -- with change-detection machine learning algorithms customized
+  for more than 800 ecoregions globally, using satellite radar and optical imagery to map biomass
+  and biomass change annually.
+
+  This HDX dataset provides only the AGB layer. CTrees' broader Land Carbon Map product (see
+  https://ctrees.org/products) also estimates belowground biomass (via ecological models) and
+  per-pixel uncertainty (via error propagation models); neither is included in this dataset.
+
+  Peer-reviewed methodology references: Saatchi, S., et al. (2011). Benchmark map of forest carbon
+  stocks in tropical regions across three continents. PNAS, 108(24), 9899-9904.
+  https://doi.org/10.1073/pnas.1019576108. Xu, L., et al. (2021). Changes in global terrestrial live
+  biomass over the 21st century. Science Advances, 7(27), eabe9829.
+  https://doi.org/10.1126/sciadv.abe9829.
 caveats: |
   Pixel values are the source's native int16 representation, scaled x10 (raw value / 10 = true
   Mg/ha). This scale factor is recorded in each resource's GeoTIFF band metadata (Scale/Offset
@@ -23,6 +39,3 @@ notes: |
   hectare (Mg/ha) -- divide by 10 to get Mg/ha. See the caveats field and resource description
   for details on how this scale factor is recorded and why it isn't applied automatically by most
   tools.
-
-  Interim metadata: organization, license, and methodology are placeholders pending CTrees/DPT
-  completing the HDX metadata form.

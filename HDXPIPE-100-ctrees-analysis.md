@@ -968,6 +968,29 @@ Either way — like every other encoding tried so far — none of these get DR C
 plausibly-uploadable range. Consistent with 5.3/5.4's conclusion: DR Congo's problem is data volume,
 not a fixable encoding inefficiency; codec choice narrows the gap but doesn't close it.
 
+### 5.6 Follow-up: what if compression weren't forced at all? (2026-08-07)
+
+For completeness — quantifying how much work the explicit `compress=ZSTD, predictor=STANDARD,
+level=9` creation options in the 5.5 decision are actually doing, versus just leaving the `COG`
+driver's own defaults in place. `gdalinfo --format COG`'s `<CreationOptionList>` confirms those
+defaults are `COMPRESS=LZW`, `PREDICTOR=FALSE` (no predictor) — not ZSTD, and not the predictor-2
+integer differencing 5.5 found helpful for int16.
+
+**DR Congo (`cod`), int16, plain default LZW (no predictor)** — measured directly (same live
+source, same real `cod-ab-global` bbox as 5.5, 456,162,872 px): **1132.0 MB**. Verified as a valid
+COG (`gdalinfo`: `COMPRESS=LZW`).
+
+| Encoding | Size |
+|---|---|
+| int16, plain LZW, no predictor (GDAL `COG` driver defaults, unforced) | 1132.0 MB |
+| int16, ZSTD, predictor 2, level 9 (5.5, current shipped) | 819.7 MB |
+| int16, LERC_DEFLATE, lossless (5.4) | 804.7 MB |
+
+Leaving compression at GDAL's defaults instead of forcing ZSTD+predictor would make DR Congo's file
+**~38% larger** (1132.0 vs 819.7MB) — confirms the explicit creation options in the 5.5 decision are
+doing real, non-marginal work, not a redundant belt-and-suspenders tweak over what `COG` would do
+unprompted.
+
 ---
 
 ### Decision: int16 + ZSTD for now (2026-08-06), interim — DR Congo still unresolved
@@ -1024,6 +1047,37 @@ DR Congo remains the actual stress-test case before considering this resolved: c
 under the original encoding, confirmed at 819.7MB under the new int16+ZSTD encoding — real
 progress, but very likely still too large without a structural change (option 3) or a confirmed
 higher limit (option 2).
+
+---
+
+## 5.7 `methodology_other` filled in from ctrees.org/products (2026-08-07)
+
+Per §1.3 #7/§3.3, `methodology_other` had been left as a literal `Placeholder` pending CTrees/DPT
+completing HDX's own metadata form (still outstanding). The user pasted the actual text of
+ctrees.org/products (WebFetch couldn't render the JS page directly) — CTrees' own published
+description of the methodology behind their "Land Carbon Map" product. That page's methodology
+covers three things: (1) AGB via LiDAR (NASA ICESat/GEDI) calibrated against >1.5M ground plots,
+combined with ecoregion-customized (800+ ecoregions) change-detection ML using radar/optical
+imagery; (2) belowground biomass via ecological models; (3) uncertainty via error propagation
+models. This pipeline ships only the AGB band — no belowground layer, no uncertainty layer (see
+`pipeline.py`'s `get_country_raster`/`generate_dataset`, `config/project_configuration.yaml`'s
+single `agb_cog_url_template`) — so `methodology_other` was written to describe only the
+AGB-producing part of (1), explicitly note that (2)/(3) are part of CTrees' broader product but are
+**not** included here, and cite the two peer-reviewed references the page links (Saatchi et al.
+2011, Xu et al. 2021).
+
+**`methodology`/`methodology_other` is no longer a bare copier-default placeholder** — it's now
+populated from CTrees' own public, citable content, independent of whether the formal CTrees/DPT
+HDX metadata form ever gets completed.
+
+**2026-08-07, `license_id` confirmed:** the user directly confirmed the license is Creative Commons
+Attribution 4.0 International. Checked against HDX's live `license_list` API
+(`https://data.humdata.org/api/3/action/license_list`): `cc-by` maps to "Creative Commons Attribution
+International (CC BY)" — i.e. the copier default already sitting in `hdx_dataset_static.yaml`
+(`license_id: cc-by`) happens to be the right value. No YAML change was needed, but its status
+changes from "copier-default placeholder, unconfirmed" (§1.3 #7) to "confirmed correct." `owner_org`
+and `maintainer` remain the interim stand-ins described in §1.3 #6 — still pending a permanent HDX
+org from CTrees/DPT.
 
 ---
 

@@ -129,11 +129,8 @@ class Pipeline:
                 "description": (
                     f"Aboveground biomass for {country_name} in {year}, clipped from CTrees' "
                     "global 100m-resolution annual raster. Pixel values are stored as int16, "
-                    f"scaled x{scale_factor} relative to the true value in Mg/ha -- divide by "
-                    f"{scale_factor} (or multiply by the GeoTIFF's Scale band tag) to get Mg/ha. "
-                    "A plain array read (e.g. rasterio's `.read()` or GDAL's `ReadAsArray()`) "
-                    "returns the raw scaled integers, not Mg/ha, unless you apply that "
-                    "conversion yourself."
+                    f"scaled x{scale_factor} relative to true Mg/ha value in - see dataset "
+                    "caveats."
                 ),
             }
         )

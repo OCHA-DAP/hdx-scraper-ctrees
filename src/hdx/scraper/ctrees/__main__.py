@@ -59,7 +59,7 @@ def main(
                 use_saved=use_saved,
             )
             pipeline = Pipeline(configuration, retriever, tempdir)
-            year = configuration["latest_year"]
+            year = pipeline.find_latest_year()
 
             countries = [{"iso3": iso3} for iso3 in pipeline.get_data_grid_countries()]
             boundaries_path = download_admin1_boundaries(

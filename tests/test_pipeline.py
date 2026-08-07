@@ -1,10 +1,14 @@
+from datetime import UTC, datetime
 from os.path import join
+from pathlib import Path
 
 import pytest
 import rasterio
 from hdx.utilities.downloader import Download
+from hdx.utilities.loader import load_json
 from hdx.utilities.path import temp_dir
 from hdx.utilities.retriever import Retrieve
+from rasterio.errors import RasterioIOError
 from rasterio.io import MemoryFile
 
 import hdx.scraper.ctrees.pipeline as pipeline_module
@@ -77,6 +81,119 @@ class TestPipeline:
                 # scale/offset band tags record how to recover true Mg/ha (raw / 10)
                 assert out_src.scales[0] == pytest.approx(0.1)
                 assert out_src.offsets[0] == pytest.approx(0.0)
+
+    def _patch_now_utc(self, monkeypatch, year):
+        monkeypatch.setattr(
+            pipeline_module,
+            "now_utc",
+            lambda: datetime(year, 8, 7, tzinfo=UTC),
+        )
+
+    def _patch_available_years(self, monkeypatch, available_years):
+        class _DummyDataset:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_open(path, *args, **kwargs):
+            if any(f"_{year}_" in path for year in available_years):
+                return _DummyDataset()
+            raise RasterioIOError("HTTP response code: 404")
+
+        monkeypatch.setattr(pipeline_module.rasterio, "open", fake_open)
+
+    def test_find_latest_year_current_year_available(
+        self, monkeypatch, configuration, input_dir
+    ):
+        self._patch_now_utc(monkeypatch, 2025)
+        self._patch_available_years(monkeypatch, {2025, 2024})
+
+        retriever = Retrieve(
+            downloader=None,
+            fallback_dir=input_dir,
+            saved_dir=input_dir,
+            temp_dir=input_dir,
+            save=False,
+            use_saved=False,
+        )
+        pipeline = Pipeline(configuration, retriever, tempdir=".")
+        assert pipeline.find_latest_year() == 2025
+
+    def test_find_latest_year_falls_back_to_previous_year(
+        self, monkeypatch, configuration, input_dir
+    ):
+        # current year (2026) not yet published, as is the case for the real source today
+        self._patch_now_utc(monkeypatch, 2026)
+        self._patch_available_years(monkeypatch, {2025, 2024})
+
+        retriever = Retrieve(
+            downloader=None,
+            fallback_dir=input_dir,
+            saved_dir=input_dir,
+            temp_dir=input_dir,
+            save=False,
+            use_saved=False,
+        )
+        pipeline = Pipeline(configuration, retriever, tempdir=".")
+        assert pipeline.find_latest_year() == 2025
+
+    def test_find_latest_year_raises_when_none_found(
+        self, monkeypatch, configuration, input_dir
+    ):
+        self._patch_now_utc(monkeypatch, 2026)
+        self._patch_available_years(monkeypatch, set())
+
+        retriever = Retrieve(
+            downloader=None,
+            fallback_dir=input_dir,
+            saved_dir=input_dir,
+            temp_dir=input_dir,
+            save=False,
+            use_saved=False,
+        )
+        pipeline = Pipeline(configuration, retriever, tempdir=".")
+        with pytest.raises(RasterioIOError):
+            pipeline.find_latest_year()
+
+    def test_find_latest_year_uses_saved_data_without_network(
+        self, monkeypatch, configuration, input_dir
+    ):
+        def fake_open(path, *args, **kwargs):
+            raise AssertionError("find_latest_year should not touch the network")
+
+        monkeypatch.setattr(pipeline_module.rasterio, "open", fake_open)
+
+        retriever = Retrieve(
+            downloader=None,
+            fallback_dir=input_dir,
+            saved_dir=input_dir,
+            temp_dir=input_dir,
+            save=False,
+            use_saved=True,
+        )
+        pipeline = Pipeline(configuration, retriever, tempdir=".")
+        assert pipeline.find_latest_year() == 2025
+
+    def test_find_latest_year_saves_discovered_year(self, monkeypatch, configuration):
+        self._patch_now_utc(monkeypatch, 2025)
+        self._patch_available_years(monkeypatch, {2025, 2024})
+
+        with temp_dir(
+            "TestCtreesLatestYearSave", delete_on_success=True, delete_on_failure=False
+        ) as tempdir:
+            retriever = Retrieve(
+                downloader=None,
+                fallback_dir=tempdir,
+                saved_dir=tempdir,
+                temp_dir=tempdir,
+                save=True,
+                use_saved=False,
+            )
+            pipeline = Pipeline(configuration, retriever, tempdir=".")
+            assert pipeline.find_latest_year() == 2025
+            assert load_json(Path(tempdir) / "latest_year.json") == {"year": 2025}
 
     def test_generate_dataset(self, configuration, input_dir, config_dir):
         tif_path = join(input_dir, "agb_lbn_2025.tif")

@@ -8,8 +8,8 @@ agb_scale_factor: 10
 # tag of its own (confirmed via gdalinfo), so this can't be read from the file -- it comes from
 # the equivalent Zarr source's documented _FillValue attribute instead.
 agb_fill_value: -9999
-# Latest year available in the source as of this build; backfill is latest-year-only for now
-latest_year: 2025
+# How many years to search backwards from the current year for the latest published AGB COG
+max_year_lookback: 5
 
 # HDX dataset providing country admin boundaries, used to derive per-country clip bounding boxes
 cod_ab_global_dataset_id: "cod-ab-global"

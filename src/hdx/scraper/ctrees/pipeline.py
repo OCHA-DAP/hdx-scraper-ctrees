@@ -10,7 +10,11 @@ from hdx.data.dataset import Dataset
 from hdx.data.hdxobject import HDXError
 from hdx.data.resource import Resource
 from hdx.location.country import Country
+from hdx.utilities.dateparse import now_utc
+from hdx.utilities.loader import load_json
 from hdx.utilities.retriever import Retrieve
+from hdx.utilities.saver import save_json
+from rasterio.errors import RasterioIOError
 from rasterio.windows import from_bounds
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,43 @@ class Pipeline:
             group["name"]
             for group in groups
             if len(group["name"]) == 3 and group.get("data_completeness") == "active"
+        )
+
+    def find_latest_year(self) -> int:
+        """Find the latest year for which the source AGB COG is published.
+
+        Starts at the current UTC year and walks backwards (the source is typically a year or
+        more behind real-time), opening each year's COG via /vsicurl/ until one succeeds --
+        reusing the same open call as get_country_raster, since a COG open here only reads
+        header/metadata, not the full ~38GB file.
+
+        Respects the retriever's save/use_saved flags like every other network call in this
+        pipeline: with use_saved, the year is read back from saved_dir instead of touching the
+        network at all; with save, the discovered year is persisted there for a later use_saved
+        run to pick up.
+        """
+        saved_path = self._retriever.saved_dir / "latest_year.json"
+
+        if self._retriever.use_saved:
+            logger.info(f"Using saved latest year in {saved_path}")
+            return load_json(saved_path)["year"]
+
+        url_template = self._configuration["agb_cog_url_template"]
+        max_lookback = self._configuration["max_year_lookback"]
+        current_year = now_utc().year
+
+        for year in range(current_year, current_year - max_lookback - 1, -1):
+            url = url_template.format(year=year)
+            try:
+                with rasterio.open(f"/vsicurl/{url}"):
+                    if self._retriever.save:
+                        save_json({"year": year}, saved_path)
+                    return year
+            except RasterioIOError:
+                continue
+
+        raise RasterioIOError(
+            f"No AGB COG found for years {current_year} down to {current_year - max_lookback}"
         )
 
     def get_country_raster(
@@ -129,8 +170,7 @@ class Pipeline:
                 "description": (
                     f"Aboveground biomass for {country_name} in {year}, clipped from CTrees' "
                     "global 100m-resolution annual raster. Pixel values are stored as int16, "
-                    f"scaled x{scale_factor} relative to true Mg/ha value in - see dataset "
-                    "caveats."
+                    f"scaled x{scale_factor} relative to true Mg/ha value - see dataset caveats."
                 ),
             }
         )

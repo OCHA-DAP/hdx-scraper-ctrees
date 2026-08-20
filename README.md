@@ -18,7 +18,8 @@ pipeline:
 3. Writes the clipped slice out as a per-country COG and uploads it as a GeoTIFF resource.
 
 Initial build scope: latest year only (2025), AGB only (CTrees' separate Land Use Change Alerts
-product is out of scope). See `docs/analysis/HDXPIPE-100-ctrees.md` for the full design rationale.
+product is out of scope). See `docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md` for the
+full design rationale.
 
 ## Development
 

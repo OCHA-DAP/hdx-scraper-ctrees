@@ -34,7 +34,7 @@ explicitly in both the resource description and the dataset-level
 DR Congo (the largest country) drops from 1.71GB to 819.7MB — real progress
 (~52% smaller) but still very likely over whatever limit rejected the
 original file; the remaining gap is an open, unresolved problem (see
-`docs/analysis/HDXPIPE-100-ctrees.md` §5.6's options: find the actual upload
+`docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md` §5.6's options: find the actual upload
 limit, tile large countries into multiple resources, or accept per-country
 skip via the failure-isolation fix in 0004). A GDAL-aware tool (QGIS
 Identify, etc.) shows the real Mg/ha value automatically via the Scale tag;

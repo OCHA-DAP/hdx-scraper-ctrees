@@ -36,7 +36,8 @@ product is out of scope).
 
 ## Design rationale & background
 
-`docs/analysis/HDXPIPE-100-ctrees.md` is the working analysis document for this build —
+`docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md` is the working analysis document for
+this build —
 requirements, template comparison, design decisions, and a running log of implementation findings
 (e.g. why the output is int16+ZSTD rather than float32, the resource/dataset-level notes about the
 scale factor, and the still-open DR Congo file-size problem). Consult it for *why* something is
@@ -48,7 +49,7 @@ the doc, not as ground truth to defer to.
 
 Non-trivial design decisions and implementation plans made from here on are recorded in
 `docs/decisions/` (see `docs/decisions/README.md`), rather than added to
-`docs/analysis/HDXPIPE-100-ctrees.md`.
+`docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md`.
 
 ## Running
 

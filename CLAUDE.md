@@ -36,7 +36,7 @@ product is out of scope).
 
 ## Design rationale & background
 
-`HDXPIPE-100-ctrees-analysis.md` (repo root) is the working analysis document for this build —
+`docs/analysis/HDXPIPE-100-ctrees.md` is the working analysis document for this build —
 requirements, template comparison, design decisions, and a running log of implementation findings
 (e.g. why the output is int16+ZSTD rather than float32, the resource/dataset-level notes about the
 scale factor, and the still-open DR Congo file-size problem). Consult it for *why* something is
@@ -45,6 +45,10 @@ built the way it is, especially anything marked "interim"/"revisitable" or an op
 It's a point-in-time record of decisions and measurements, not a live spec — if it conflicts with
 the current code or config, the code wins; treat a stale-looking claim there as a signal to update
 the doc, not as ground truth to defer to.
+
+Non-trivial design decisions and implementation plans made from here on are recorded in
+`docs/decisions/` (see `docs/decisions/README.md`), rather than added to
+`docs/analysis/HDXPIPE-100-ctrees.md`.
 
 ## Running
 

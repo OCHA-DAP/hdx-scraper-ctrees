@@ -201,10 +201,10 @@ class TestPipeline:
         dataset = pipeline.generate_dataset("lbn", tif_path, 2025)
 
         assert dataset["name"] == "lbn-ctrees-aboveground-biomass"
-        assert dataset["title"] == "Lebanon - CTrees Aboveground Biomass"
+        assert dataset["title"] == "Lebanon - Aboveground Biomass"
 
         dataset.update_from_yaml(path=join(config_dir, "hdx_dataset_static.yaml"))
-        assert dataset["owner_org"] == "hdx"
+        assert dataset["owner_org"] == "22b445e2-97ee-436d-994a-4a4c8c63c847"
 
         resources = dataset.get_resources()
         assert len(resources) == 1

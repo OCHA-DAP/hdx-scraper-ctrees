@@ -1,6 +1,14 @@
 # HDXPIPE-100 — HDX Pipeline: CTrees — Stage 1-3 Analysis
 
 Saved 2026-07-31, revised 2026-08-03 (three times). Produced by the `hdx:pipeline-builder` skill.
+
+**Five decisions from this document have been extracted as formal decision
+records in `docs/decisions/`** (0001 data source, 0002 boundary source, 0003
+raster encoding, 0004 per-country failure isolation, 0005 nodata masking).
+This document remains the full narrative/working-analysis record; the
+`docs/decisions/` files are the distilled, durable versions of its
+already-settled decisions.
+
 **Checkpoint 1: approved 2026-08-04** ("Implement option B").
 Jira ticket: https://humanitarian.atlassian.net/browse/HDXPIPE-100
 Answers used in this revision: https://humanitarian.atlassian.net/browse/HDXPIPE-100?focusedCommentId=289733

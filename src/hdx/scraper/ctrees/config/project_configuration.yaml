@@ -15,7 +15,7 @@ max_year_lookback: 5
 cod_ab_global_dataset_id: "cod-ab-global"
 cod_ab_global_resource_name: "global_admin_boundaries_matched_latest.gdb.zip"
 
-dataset_title_suffix: "CTrees Aboveground Biomass"
+dataset_title_suffix: "Aboveground Biomass"
 tags:
   - "climate-weather"
   - "environment"

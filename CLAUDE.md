@@ -36,20 +36,24 @@ product is out of scope).
 
 ## Design rationale & background
 
-`docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md` is the working analysis document for
-this build —
-requirements, template comparison, design decisions, and a running log of implementation findings
-(e.g. why the output is int16+ZSTD rather than float32, the resource/dataset-level notes about the
-scale factor, and the still-open DR Congo file-size problem). Consult it for *why* something is
-built the way it is, especially anything marked "interim"/"revisitable" or an open decision.
+Non-trivial design decisions are recorded in `docs/decisions/` (see `docs/decisions/README.md`) —
+consult it for *why* something is built the way it is; only the distilled decision belongs here.
 
-It's a point-in-time record of decisions and measurements, not a live spec — if it conflicts with
-the current code or config, the code wins; treat a stale-looking claim there as a signal to update
-the doc, not as ground truth to defer to.
+## Known Limitations
 
-Non-trivial design decisions and implementation plans made from here on are recorded in
-`docs/decisions/` (see `docs/decisions/README.md`), rather than added to
-`docs/plans/2026-07-31-hdxpipe-100-ctrees-initial-build.md`.
+- **DR Congo (and possibly other large countries) may still be too large to upload.** Switching the
+  raster encoding to int16+ZSTD (see `0003`) brought DR Congo from 1.71GB down to 819.7MB, but that
+  is still very likely over whatever upload limit originally rejected the file (Cameroon's 375.7MB
+  was already rejected, and DR Congo's compressed size is ~2.2x that). Not yet resolved. Options
+  considered but not yet chosen among:
+  1. A bounded-error LERC or ZSTD variant for further size reduction.
+  2. Find the actual nginx/CKAN upload limit from DPT/DSys before deciding whether any further
+     encoding change is enough, or whether large countries need a structural fix.
+  3. Tile the largest countries into multiple resources (e.g. per admin1) rather than one
+     country-wide raster.
+  4. Keep the current encoding and rely on the per-country failure isolation (`0004`) so countries
+     still too large are cleanly skipped/logged rather than crashing the run, treating further
+     shrinkage as a follow-up ticket.
 
 ## Running
 

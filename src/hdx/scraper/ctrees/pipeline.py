@@ -8,6 +8,7 @@ import rasterio
 from hdx.api.configuration import Configuration
 from hdx.data.dataset import Dataset
 from hdx.data.hdxobject import HDXError
+from hdx.data.location import Location
 from hdx.data.resource import Resource
 from hdx.location.country import Country
 from hdx.utilities.dateparse import now_utc
@@ -29,20 +30,21 @@ class Pipeline:
     def get_data_grid_countries(self) -> list[str]:
         """Fetch HDX's active Data Grid countries (3-letter group names).
 
-        Treated as a live/short-TTL lookup rather than a frozen static list, since Data Grid
-        membership changes over time.
+        Respects the retriever's save/use_saved flags like every other network call in this
+        pipeline: with use_saved, the countries are read back from saved_dir instead of touching
+        the network at all; with save, the fetched countries are persisted there for a later
+        use_saved run to pick up.
         """
-        hdx_site_url = self._configuration.get_hdx_site_url()
-        response = self._retriever.download_json(
-            f"{hdx_site_url}/api/3/action/group_list?all_fields=true&include_extras=true",
-            filename="data_grid_group_list.json",
-        )
-        groups = response["result"]
-        return sorted(
-            group["name"]
-            for group in groups
-            if len(group["name"]) == 3 and group.get("data_completeness") == "active"
-        )
+        saved_path = self._retriever.saved_dir / "data_grid_countries.json"
+
+        if self._retriever.use_saved:
+            logger.info(f"Using saved Data Grid countries in {saved_path}")
+            return load_json(saved_path)["countries"]
+
+        countries = Location.get_data_grid_countries(configuration=self._configuration)
+        if self._retriever.save:
+            save_json({"countries": countries}, saved_path)
+        return countries
 
     def find_latest_year(self) -> int:
         """Find the latest year for which the source AGB COG is published.

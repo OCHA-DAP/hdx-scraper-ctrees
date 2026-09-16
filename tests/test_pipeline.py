@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 import rasterio
-from hdx.utilities.downloader import Download
 from hdx.utilities.loader import load_json
 from hdx.utilities.path import temp_dir
 from hdx.utilities.retriever import Retrieve
@@ -16,24 +15,54 @@ from hdx.scraper.ctrees.pipeline import Pipeline
 
 
 class TestPipeline:
-    def test_get_data_grid_countries(self, configuration, input_dir):
-        with temp_dir(
-            "TestCtreesDataGrid", delete_on_success=True, delete_on_failure=False
-        ) as tempdir:
-            with Download(user_agent="test") as downloader:
-                retriever = Retrieve(
-                    downloader=downloader,
-                    fallback_dir=tempdir,
-                    saved_dir=input_dir,
-                    temp_dir=tempdir,
-                    save=False,
-                    use_saved=True,
-                )
-                pipeline = Pipeline(configuration, retriever, tempdir)
-                countries = pipeline.get_data_grid_countries()
+    def test_get_data_grid_countries_uses_saved_data_without_network(
+        self, monkeypatch, configuration, input_dir
+    ):
+        def fail_get_data_grid_countries(**kwargs):
+            raise AssertionError("get_data_grid_countries should not touch the network")
 
-        # excludes "syr" (inactive) and "world" (not a 3-letter country group)
-        assert countries == ["afg", "lbn"]
+        monkeypatch.setattr(
+            pipeline_module.Location,
+            "get_data_grid_countries",
+            staticmethod(fail_get_data_grid_countries),
+        )
+
+        retriever = Retrieve(
+            downloader=None,
+            fallback_dir=input_dir,
+            saved_dir=input_dir,
+            temp_dir=input_dir,
+            save=False,
+            use_saved=True,
+        )
+        pipeline = Pipeline(configuration, retriever, tempdir=".")
+        assert pipeline.get_data_grid_countries() == ["afg", "lbn"]
+
+    def test_get_data_grid_countries_saves_fetched_countries(
+        self, monkeypatch, configuration
+    ):
+        monkeypatch.setattr(
+            pipeline_module.Location,
+            "get_data_grid_countries",
+            staticmethod(lambda **kwargs: ["afg", "lbn"]),
+        )
+
+        with temp_dir(
+            "TestCtreesDataGridSave", delete_on_success=True, delete_on_failure=False
+        ) as tempdir:
+            retriever = Retrieve(
+                downloader=None,
+                fallback_dir=tempdir,
+                saved_dir=tempdir,
+                temp_dir=tempdir,
+                save=True,
+                use_saved=False,
+            )
+            pipeline = Pipeline(configuration, retriever, tempdir=".")
+            assert pipeline.get_data_grid_countries() == ["afg", "lbn"]
+            assert load_json(Path(tempdir) / "data_grid_countries.json") == {
+                "countries": ["afg", "lbn"]
+            }
 
     def test_get_country_raster(self, monkeypatch, configuration, input_dir):
         fixture_path = join(input_dir, "agb_lbn_2025.tif")
@@ -204,7 +233,7 @@ class TestPipeline:
         assert dataset["title"] == "Lebanon - Aboveground Biomass"
 
         dataset.update_from_yaml(path=join(config_dir, "hdx_dataset_static.yaml"))
-        assert dataset["owner_org"] == "22b445e2-97ee-436d-994a-4a4c8c63c847"
+        assert dataset["owner_org"] == "221a455b-1aca-4f4e-b776-cca7277c4a50"
 
         resources = dataset.get_resources()
         assert len(resources) == 1

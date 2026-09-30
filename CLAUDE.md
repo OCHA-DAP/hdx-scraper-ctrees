@@ -6,12 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **hdx-scraper-ctrees** publishes annual, 100m-resolution Aboveground Biomass (AGB) data from
 [CTrees](https://ctrees.org), a NASA-affiliated forest-carbon monitoring organization, as one HDX
-dataset per active HDX Data Grid country.
+dataset per country in the Global Humanitarian Overview (GHO).
 
 The source is CTrees' global AGB raster, mirrored as public (no-auth) Cloud-Optimized GeoTIFFs
-(COGs) in an AWS Open Data S3 bucket, one file per year. For each active Data Grid country, the
-pipeline looks up the country's admin1 bounding box from HDX's own `cod-ab-global` boundaries
-dataset, reads a windowed slice of that year's global AGB COG (via GDAL's `/vsicurl/` streaming —
+(COGs) in an AWS Open Data S3 bucket, one file per year. For each GHO country (the "In GHO"
+column of hdx-python-country's OCHA countries feed), the pipeline looks up the country's admin1
+bounding box from HDX's own `cod-ab-global` boundaries dataset (falling back to fieldmaps'
+per-country COD GeoPackages for GHO countries it lacks, 12 as of 2026-09-30), reads a windowed slice of that year's global AGB COG (via GDAL's `/vsicurl/` streaming —
 only the relevant byte ranges are fetched, never the whole ~38GB file), and uploads the clipped
 slice as a per-country COG resource.
 
@@ -20,17 +21,19 @@ product is out of scope).
 
 ## Key Files
 
-- `src/hdx/scraper/ctrees/__main__.py` — orchestration entry point (`main()`): fetches Data Grid
+- `src/hdx/scraper/ctrees/__main__.py` — orchestration entry point (`main()`): fetches GHO
   countries, downloads/extracts the `cod-ab-global` boundaries once per run, then loops per country
   with explicit try/except isolation (one bad country must not abort the batch).
-- `src/hdx/scraper/ctrees/pipeline.py` — `Pipeline` class: `get_data_grid_countries()`,
+- `src/hdx/scraper/ctrees/pipeline.py` — `Pipeline` class: `get_gho_countries()`,
   `get_country_raster()` (windowed COG read + clip + write), `generate_dataset()` (HDX
   `Dataset`/`Resource` construction).
 - `src/hdx/scraper/ctrees/boundaries.py` — `cod-ab-global` boundary download/extraction and
-  per-country bbox lookup (`download_admin1_boundaries()`, `get_country_bbox()`). Isolated from
+  per-country bbox lookup (`download_admin1_boundaries()`, `get_country_bbox()`), plus the
+  fieldmaps fallback (`get_fieldmaps_country_bbox()`, see `0008`). Isolated from
   `pipeline.py` since it has no HDX pipeline precedent elsewhere.
 - `src/hdx/scraper/ctrees/config/project_configuration.yaml` — source COG URL template, AGB scale
-  factor/fill value, `cod-ab-global` dataset/resource ids, latest year, tags.
+  factor/fill value, `cod-ab-global` dataset/resource ids, fieldmaps URL template,
+  per-country `downsample_factors` (bra: 2, i.e. 200m), tags.
 - `src/hdx/scraper/ctrees/config/hdx_dataset_static.yaml` — static metadata applied to every
   country dataset (org/maintainer, license, notes, caveats).
 
@@ -41,7 +44,12 @@ consult it for *why* something is built the way it is; only the distilled decisi
 
 ## Known Limitations
 
-- **DR Congo (and possibly other large countries) may still be too large to upload.** Switching the
+- **Jordan is skipped.** It is in neither `cod-ab-global` nor fieldmaps' COD extracts (`0008`).
+- **Brazil is published at 200m** (2x2 average, `0008`), which gives 671.2MB. That is likely
+  still over the upload limit below.
+- **DR Congo (and possibly other large countries) may still be too large to upload.** Expanding
+  from Data Grid (22 countries) to GHO (55) adds larger ones, e.g. Brazil (~3.7x DR Congo's land
+  area), Argentina, Mexico and Iran, which are likely to hit the same limit. Switching the
   raster encoding to int16+ZSTD (see `0003`) brought DR Congo from 1.71GB down to 819.7MB, but that
   is still very likely over whatever upload limit originally rejected the file (Cameroon's 375.7MB
   was already rejected, and DR Congo's compressed size is ~2.2x that). Not yet resolved. Options
@@ -80,7 +88,7 @@ uv run pytest
 
 Tests live in `tests/test_pipeline.py` and `tests/test_boundaries.py`, against fixtures in
 `tests/fixtures/input/` (a real captured AGB slice, a synthetic boundary GeoJSON standing in for
-the ~1GB real `cod-ab-global` GDB, and a saved Data Grid `group_list` response) — no live network
+the ~1GB real `cod-ab-global` GDB, and a saved GHO country list) — no live network
 calls in CI.
 
 ## Code Style

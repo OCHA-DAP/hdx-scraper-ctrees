@@ -50,7 +50,7 @@ def main(
     """
     logger.info(f"##### {_LOOKUP} version {__version__} ####")
     configuration = Configuration.read()
-    User.check_current_user_write_access("6505d394-9510-4891-be39-d7e95e04afa9")#221a455b-1aca-4f4e-b776-cca7277c4a50")
+    User.check_current_user_write_access("221a455b-1aca-4f4e-b776-cca7277c4a50")
 
     with wheretostart_tempdir_batch(folder=_LOOKUP) as info:
         tempdir = info["folder"]

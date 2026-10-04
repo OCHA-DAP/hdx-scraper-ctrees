@@ -5,10 +5,10 @@
 
 This pipeline publishes annual, 100m-resolution Aboveground Biomass (AGB) data from
 [CTrees](https://ctrees.org), a NASA-affiliated forest-carbon monitoring organization, as one HDX
-dataset per HDX Data Grid country.
+dataset per country in the Global Humanitarian Overview (GHO).
 
 The source is CTrees' global AGB raster, mirrored as public (no-auth) Cloud-Optimized GeoTIFFs
-(COGs) in an AWS Open Data S3 bucket, one file per year. For each active HDX Data Grid country, the
+(COGs) in an AWS Open Data S3 bucket, one file per year. For each GHO country, the
 pipeline:
 
 1. Looks up the country's admin1 bounding box from HDX's own

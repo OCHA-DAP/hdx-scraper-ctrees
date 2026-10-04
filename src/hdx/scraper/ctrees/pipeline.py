@@ -2,20 +2,24 @@
 """CTrees scraper"""
 
 import logging
-from os.path import join
+from math import ceil
+from os import remove
+from os.path import exists, join
 
 import rasterio
 from hdx.api.configuration import Configuration
 from hdx.data.dataset import Dataset
 from hdx.data.hdxobject import HDXError
-from hdx.data.location import Location
 from hdx.data.resource import Resource
 from hdx.location.country import Country
 from hdx.utilities.dateparse import now_utc
 from hdx.utilities.loader import load_json
 from hdx.utilities.retriever import Retrieve
 from hdx.utilities.saver import save_json
+from rasterio.enums import Resampling
 from rasterio.errors import RasterioIOError
+from rasterio.transform import Affine
+from rasterio.vrt import WarpedVRT
 from rasterio.windows import from_bounds
 
 logger = logging.getLogger(__name__)
@@ -27,21 +31,26 @@ class Pipeline:
         self._retriever = retriever
         self._tempdir = tempdir
 
-    def get_data_grid_countries(self) -> list[str]:
-        """Fetch HDX's active Data Grid countries (3-letter group names).
+    def get_gho_countries(self) -> list[str]:
+        """Fetch the lowercase ISO3 codes of countries in the Global Humanitarian Overview (GHO),
+        from the "In GHO" column of hdx-python-country's OCHA countries feed.
 
         Respects the retriever's save/use_saved flags like every other network call in this
         pipeline: with use_saved, the countries are read back from saved_dir instead of touching
         the network at all; with save, the fetched countries are persisted there for a later
         use_saved run to pick up.
         """
-        saved_path = self._retriever.saved_dir / "data_grid_countries.json"
+        saved_path = self._retriever.saved_dir / "gho_countries.json"
 
         if self._retriever.use_saved:
-            logger.info(f"Using saved Data Grid countries in {saved_path}")
+            logger.info(f"Using saved GHO countries in {saved_path}")
             return load_json(saved_path)["countries"]
 
-        countries = Location.get_data_grid_countries(configuration=self._configuration)
+        countries = sorted(
+            iso3.lower()
+            for iso3, countryinfo in Country.countriesdata()["countries"].items()
+            if countryinfo.get("In GHO") == "Y"
+        )
         if self._retriever.save:
             save_json({"countries": countries}, saved_path)
         return countries
@@ -93,7 +102,7 @@ class Pipeline:
 
         Written as the source's native int16 (still scaled x`agb_scale_factor`, not divided) --
         per HDXPIPE-100 analysis 5.5/5.6, this halves the file size vs. float32 for the largest
-        Data Grid countries. The `Scale`/`Offset` GDAL band tags record the conversion back to
+        countries. The `Scale`/`Offset` GDAL band tags record the conversion back to
         true Mg/ha, but most plain script-based reads (rasterio's `.read()`, GDAL's
         `ReadAsArray()`) do not apply them automatically -- see the resource description/caveats
         for the consumer-facing warning about this.
@@ -102,17 +111,35 @@ class Pipeline:
         "NoData Value" line), even though its documented fill value is -9999 (from the
         equivalent Zarr source's `_FillValue` attribute, see HDXPIPE-100 analysis 3.3) -- so the
         fill value must come from configuration, not `src.nodata` (which is None here).
+
+        Countries in `downsample_factors` (bra: 2, i.e. 200m) are averaged over factor x factor
+        blocks through a WarpedVRT, with the configured fill value excluded from the mean.
         """
         url = self._configuration["agb_cog_url_template"].format(year=year)
         scale_factor = self._configuration["agb_scale_factor"]
         fill_value = self._configuration["agb_fill_value"]
+        factor = self._get_downsample_factor(iso3)
 
         with rasterio.open(f"/vsicurl/{url}") as src:
             window = from_bounds(*bbox, transform=src.transform)
             window = window.round_offsets().round_lengths()
-            data = src.read(1, window=window)
-            transform = src.window_transform(window)
             crs = src.crs
+            if factor == 1:
+                data = src.read(1, window=window)
+                transform = src.window_transform(window)
+            else:
+                transform = src.window_transform(window) * Affine.scale(factor)
+                with WarpedVRT(
+                    src,
+                    crs=crs,
+                    transform=transform,
+                    width=ceil(window.width / factor),
+                    height=ceil(window.height / factor),
+                    src_nodata=fill_value,
+                    nodata=fill_value,
+                    resampling=Resampling.average,
+                ) as vrt:
+                    data = vrt.read(1)
 
         data = data.astype("int16")
 
@@ -128,15 +155,26 @@ class Pipeline:
             "compress": "ZSTD",
             "predictor": "STANDARD",
             "level": 9,
+            # GDAL's COG default is CUBIC, which overshoots at forest edges (down to -28.3 Mg/ha
+            # in Brazil's overviews)
+            "overview_resampling": "average",
         }
 
         out_path = join(self._tempdir, f"{iso3.lower()}_ctrees_aboveground_biomass.tif")
-        with rasterio.open(out_path, "w", **profile) as dst:
-            dst.write(data, 1)
-            dst.scales = (1 / scale_factor,)
-            dst.offsets = (0.0,)
+        try:
+            with rasterio.open(out_path, "w", **profile) as dst:
+                dst.write(data, 1)
+                dst.scales = (1 / scale_factor,)
+                dst.offsets = (0.0,)
+        except Exception:
+            if exists(out_path):
+                remove(out_path)
+            raise
 
         return out_path
+
+    def _get_downsample_factor(self, iso3: str) -> int:
+        return self._configuration["downsample_factors"].get(iso3.lower(), 1)
 
     def generate_dataset(self, iso3: str, tif_path: str, year: int) -> Dataset | None:
         country_name = Country.get_country_name_from_iso3(iso3)
@@ -165,13 +203,21 @@ class Pipeline:
             return None
 
         scale_factor = self._configuration["agb_scale_factor"]
+        factor = self._get_downsample_factor(iso3)
+        if factor == 1:
+            resolution = "clipped from CTrees' global 100m-resolution annual raster"
+        else:
+            resolution = (
+                "clipped from CTrees' global 100m-resolution annual raster and resampled "
+                f"to {100 * factor}m by averaging"
+            )
         resource_name = f"{iso3.lower()}_ctrees_aboveground_biomass.tif"
         resource = Resource(
             {
                 "name": resource_name,
                 "description": (
-                    f"Aboveground biomass for {country_name} in {year}, clipped from CTrees' "
-                    "global 100m-resolution annual raster. Pixel values are stored as int16, "
+                    f"Aboveground biomass for {country_name} in {year}, {resolution}. "
+                    "Pixel values are stored as int16, "
                     f"scaled x{scale_factor} relative to true Mg/ha value - see dataset caveats."
                 ),
             }

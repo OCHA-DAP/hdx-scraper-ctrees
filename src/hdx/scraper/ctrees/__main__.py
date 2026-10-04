@@ -6,7 +6,8 @@ script then creates in HDX.
 """
 
 import logging
-from os.path import expanduser, join
+from os import remove
+from os.path import exists, expanduser, join
 
 from hdx.api.configuration import Configuration
 from hdx.data.user import User
@@ -20,7 +21,11 @@ from hdx.utilities.path import (
 from hdx.utilities.retriever import Retrieve
 
 from hdx.scraper.ctrees._version import __version__
-from hdx.scraper.ctrees.boundaries import download_admin1_boundaries, get_country_bbox
+from hdx.scraper.ctrees.boundaries import (
+    download_admin1_boundaries,
+    get_country_bbox,
+    get_fieldmaps_country_bbox,
+)
 from hdx.scraper.ctrees.pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
@@ -61,15 +66,24 @@ def main(
             pipeline = Pipeline(configuration, retriever, tempdir)
             year = pipeline.find_latest_year()
 
-            countries = [{"iso3": iso3} for iso3 in pipeline.get_data_grid_countries()]
+            countries = [{"iso3": iso3} for iso3 in pipeline.get_gho_countries()]
             boundaries_path = download_admin1_boundaries(
                 retriever, configuration, tempdir
             )
 
             for _, nextdict in progress_storing_folder(info, countries, "iso3"):
                 iso3 = nextdict["iso3"]
+                tif_path = None
                 try:
-                    bbox = get_country_bbox(boundaries_path, iso3)
+                    try:
+                        bbox = get_country_bbox(boundaries_path, iso3)
+                    except ValueError:
+                        logger.info(
+                            f"{iso3} not in cod-ab-global, using fieldmaps COD boundaries"
+                        )
+                        bbox = get_fieldmaps_country_bbox(
+                            retriever, configuration, iso3
+                        )
                     tif_path = pipeline.get_country_raster(iso3, bbox, year)
                     dataset = pipeline.generate_dataset(iso3, tif_path, year)
                     if dataset:
@@ -87,6 +101,10 @@ def main(
                 except Exception:
                     logger.exception(f"Failed to process {iso3}, skipping")
                     continue
+                finally:
+                    # Outputs reach ~800MB, so delete each before the next is built
+                    if tif_path and exists(tif_path):
+                        remove(tif_path)
 
 
 if __name__ == "__main__":

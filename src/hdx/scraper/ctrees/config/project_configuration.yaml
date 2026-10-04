@@ -14,6 +14,12 @@ max_year_lookback: 5
 # HDX dataset providing country admin boundaries, used to derive per-country clip bounding boxes
 cod_ab_global_dataset_id: "cod-ab-global"
 cod_ab_global_resource_name: "global_admin_boundaries_matched_latest.gdb.zip"
+# Per-country COD boundaries for countries missing from cod-ab-global (fieldmaps has no jor, so
+# it is skipped)
+fieldmaps_cod_url_template: "https://data.fieldmaps.io/cod/originals/{iso3}.gpkg.zip"
+# Countries too large to publish at the source's native 100m: integer downsample factor
+downsample_factors:
+  bra: 2
 
 dataset_title_suffix: "Aboveground Biomass"
 tags:

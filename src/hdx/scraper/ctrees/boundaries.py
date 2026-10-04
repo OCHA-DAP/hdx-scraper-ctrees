@@ -66,3 +66,20 @@ def get_country_bbox(
         raise ValueError(f"No admin1 boundaries found for country {iso3}")
     minx, miny, maxx, maxy = country_gdf.total_bounds
     return minx, miny, maxx, maxy
+
+
+def get_fieldmaps_country_bbox(
+    retriever: Retrieve, configuration: Configuration, iso3: str
+) -> tuple[float, float, float, float]:
+    """Return (minx, miny, maxx, maxy) for a country missing from cod-ab-global, from the
+    `{iso3}_adm0` layer of fieldmaps' per-country COD GeoPackage (EPSG:4326, re-extracted from
+    HDX's `cod-ab-{iso3}` data).
+
+    Countries fieldmaps doesn't cover (jor) raise a DownloadError.
+    """
+    iso3 = iso3.lower()
+    url = configuration["fieldmaps_cod_url_template"].format(iso3=iso3)
+    zip_path = retriever.download_file(url, filename=f"{iso3}.gpkg.zip")
+    gdf = gpd.read_file(f"/vsizip/{zip_path}", layer=f"{iso3}_adm0")
+    minx, miny, maxx, maxy = gdf.total_bounds
+    return minx, miny, maxx, maxy

@@ -15,16 +15,14 @@ from hdx.scraper.ctrees.pipeline import Pipeline
 
 
 class TestPipeline:
-    def test_get_data_grid_countries_uses_saved_data_without_network(
+    def test_get_gho_countries_uses_saved_data_without_network(
         self, monkeypatch, configuration, input_dir
     ):
-        def fail_get_data_grid_countries(**kwargs):
-            raise AssertionError("get_data_grid_countries should not touch the network")
+        def fail_countriesdata(*args, **kwargs):
+            raise AssertionError("get_gho_countries should not touch the network")
 
         monkeypatch.setattr(
-            pipeline_module.Location,
-            "get_data_grid_countries",
-            staticmethod(fail_get_data_grid_countries),
+            pipeline_module.Country, "countriesdata", fail_countriesdata
         )
 
         retriever = Retrieve(
@@ -36,19 +34,26 @@ class TestPipeline:
             use_saved=True,
         )
         pipeline = Pipeline(configuration, retriever, tempdir=".")
-        assert pipeline.get_data_grid_countries() == ["afg", "lbn"]
+        assert pipeline.get_gho_countries() == ["afg", "lbn"]
 
-    def test_get_data_grid_countries_saves_fetched_countries(
+    def test_get_gho_countries_saves_fetched_countries(
         self, monkeypatch, configuration
     ):
+        countriesdata = {
+            "countries": {
+                "LBN": {"In GHO": "Y"},
+                "AFG": {"In GHO": "Y"},
+                "FRA": {"In GHO": None},
+            }
+        }
         monkeypatch.setattr(
-            pipeline_module.Location,
-            "get_data_grid_countries",
-            staticmethod(lambda **kwargs: ["afg", "lbn"]),
+            pipeline_module.Country,
+            "countriesdata",
+            lambda *args, **kwargs: countriesdata,
         )
 
         with temp_dir(
-            "TestCtreesDataGridSave", delete_on_success=True, delete_on_failure=False
+            "TestCtreesGHOSave", delete_on_success=True, delete_on_failure=False
         ) as tempdir:
             retriever = Retrieve(
                 downloader=None,
@@ -59,12 +64,16 @@ class TestPipeline:
                 use_saved=False,
             )
             pipeline = Pipeline(configuration, retriever, tempdir=".")
-            assert pipeline.get_data_grid_countries() == ["afg", "lbn"]
-            assert load_json(Path(tempdir) / "data_grid_countries.json") == {
+            assert pipeline.get_gho_countries() == ["afg", "lbn"]
+            assert load_json(Path(tempdir) / "gho_countries.json") == {
                 "countries": ["afg", "lbn"]
             }
 
-    def test_get_country_raster(self, monkeypatch, configuration, input_dir):
+    def _patch_source_cog(self, monkeypatch, input_dir, fill_pixels=()):
+        """Stub the /vsicurl/ source COG with the LBN fixture, returning (bbox, data).
+
+        `fill_pixels` are (row, col) positions set to -9999, since the fixture has none.
+        """
         fixture_path = join(input_dir, "agb_lbn_2025.tif")
         real_open = rasterio.open
 
@@ -78,6 +87,8 @@ class TestPipeline:
             profile = fixture_src.profile.copy()
             bbox = tuple(fixture_src.bounds)
         profile["nodata"] = None
+        for row, col in fill_pixels:
+            data[row, col] = -9999
 
         memfile = MemoryFile()
         with memfile.open(**profile) as mem_src:
@@ -89,6 +100,11 @@ class TestPipeline:
             return real_open(path, *args, **kwargs)
 
         monkeypatch.setattr(pipeline_module.rasterio, "open", fake_open)
+        return bbox, data
+
+    def test_get_country_raster(self, monkeypatch, configuration, input_dir):
+        real_open = rasterio.open
+        bbox, _ = self._patch_source_cog(monkeypatch, input_dir)
 
         with temp_dir(
             "TestCtreesRaster", delete_on_success=True, delete_on_failure=False
@@ -110,6 +126,42 @@ class TestPipeline:
                 # scale/offset band tags record how to recover true Mg/ha (raw / 10)
                 assert out_src.scales[0] == pytest.approx(0.1)
                 assert out_src.offsets[0] == pytest.approx(0.0)
+                assert out_src.overviews(1)
+                assert (
+                    out_src.tags(ns="IMAGE_STRUCTURE")["OVERVIEW_RESAMPLING"].upper()
+                    == "AVERAGE"
+                )
+
+    def test_get_country_raster_downsampled(
+        self, monkeypatch, configuration, input_dir
+    ):
+        real_open = rasterio.open
+        # Top-left 2x2 block: 3 fill pixels, 1 real one. Next block along: all fill.
+        fill_pixels = [(0, 1), (1, 0), (1, 1), (0, 2), (0, 3), (1, 2), (1, 3)]
+        bbox, src_data = self._patch_source_cog(monkeypatch, input_dir, fill_pixels)
+        monkeypatch.setitem(configuration["downsample_factors"], "lbn", 2)
+
+        with temp_dir(
+            "TestCtreesRasterDownsampled",
+            delete_on_success=True,
+            delete_on_failure=False,
+        ) as tempdir:
+            pipeline = Pipeline(configuration, retriever=None, tempdir=tempdir)
+            out_path = pipeline.get_country_raster("lbn", bbox, 2025)
+
+            with real_open(out_path) as out_src:
+                data = out_src.read(1)
+                assert data.shape == (
+                    (src_data.shape[0] + 1) // 2,
+                    (src_data.shape[1] + 1) // 2,
+                )
+                assert out_src.res[0] == pytest.approx(2 * 0.000888888888888)
+                assert out_src.nodata == -9999
+                # fill pixels are excluded from the average rather than dragging it down
+                assert data[0, 0] == src_data[0, 0]
+                assert data[0, 1] == -9999
+                expected = src_data[2:4, 2:4].mean()
+                assert data[1, 1] == pytest.approx(expected, abs=1)
 
     def _patch_now_utc(self, monkeypatch, year):
         monkeypatch.setattr(
@@ -238,6 +290,16 @@ class TestPipeline:
         resources = dataset.get_resources()
         assert len(resources) == 1
         assert resources[0]["name"] == "lbn_ctrees_aboveground_biomass.tif"
+
+    def test_generate_dataset_downsampled_description(
+        self, monkeypatch, configuration, input_dir
+    ):
+        monkeypatch.setitem(configuration["downsample_factors"], "lbn", 2)
+        tif_path = join(input_dir, "agb_lbn_2025.tif")
+        pipeline = Pipeline(configuration, retriever=None, tempdir=input_dir)
+        dataset = pipeline.generate_dataset("lbn", tif_path, 2025)
+        description = dataset.get_resources()[0]["description"]
+        assert "resampled to 200m by averaging" in description
 
     def test_generate_dataset_unknown_country(self, configuration, input_dir):
         tif_path = join(input_dir, "agb_lbn_2025.tif")

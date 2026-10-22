@@ -2,11 +2,13 @@
 """CTrees scraper"""
 
 import logging
+from contextlib import nullcontext
 from math import ceil
 from os import remove
 from os.path import exists, join
 
 import rasterio
+import rasterio.shutil
 from hdx.api.configuration import Configuration
 from hdx.data.dataset import Dataset
 from hdx.data.hdxobject import HDXError
@@ -20,9 +22,13 @@ from rasterio.enums import Resampling
 from rasterio.errors import RasterioIOError
 from rasterio.transform import Affine
 from rasterio.vrt import WarpedVRT
-from rasterio.windows import from_bounds
+from rasterio.windows import Window, from_bounds
 
 logger = logging.getLogger(__name__)
+
+# Jenkins has a 2GB memory limit. Brazil (25,392 columns at 200m) peaks at 395MB with these.
+STRIP_ROWS = 1024
+GDAL_CACHEMAX_MB = 256
 
 
 class Pipeline:
@@ -120,58 +126,104 @@ class Pipeline:
         fill_value = self._configuration["agb_fill_value"]
         factor = self._get_downsample_factor(iso3)
 
-        with rasterio.open(f"/vsicurl/{url}") as src:
-            window = from_bounds(*bbox, transform=src.transform)
-            window = window.round_offsets().round_lengths()
-            crs = src.crs
-            if factor == 1:
-                data = src.read(1, window=window)
-                transform = src.window_transform(window)
-            else:
-                transform = src.window_transform(window) * Affine.scale(factor)
-                with WarpedVRT(
-                    src,
-                    crs=crs,
-                    transform=transform,
-                    width=ceil(window.width / factor),
-                    height=ceil(window.height / factor),
-                    src_nodata=fill_value,
-                    nodata=fill_value,
-                    resampling=Resampling.average,
-                ) as vrt:
-                    data = vrt.read(1)
-
-        data = data.astype("int16")
-
-        profile = {
-            "driver": "COG",
-            "height": data.shape[0],
-            "width": data.shape[1],
-            "count": 1,
-            "dtype": "int16",
-            "crs": crs,
-            "transform": transform,
-            "nodata": fill_value,
-            "compress": "ZSTD",
-            "predictor": "STANDARD",
-            "level": 9,
-            # GDAL's COG default is CUBIC, which overshoots at forest edges (down to -28.3 Mg/ha
-            # in Brazil's overviews)
-            "overview_resampling": "average",
-        }
-
         out_path = join(self._tempdir, f"{iso3.lower()}_ctrees_aboveground_biomass.tif")
+        tmp_path = join(self._tempdir, f"{iso3.lower()}_strips.tif")
         try:
-            with rasterio.open(out_path, "w", **profile) as dst:
-                dst.write(data, 1)
-                dst.scales = (1 / scale_factor,)
-                dst.offsets = (0.0,)
+            with rasterio.Env(GDAL_CACHEMAX=GDAL_CACHEMAX_MB):
+                with rasterio.open(f"/vsicurl/{url}") as src:
+                    window = from_bounds(*bbox, transform=src.transform)
+                    window = window.round_offsets().round_lengths()
+                    width = ceil(window.width / factor)
+                    height = ceil(window.height / factor)
+                    transform = src.window_transform(window) * Affine.scale(factor)
+                    if factor == 1:
+                        reader = nullcontext(src)
+                        offset = (window.col_off, window.row_off)
+                    else:
+                        reader = WarpedVRT(
+                            src,
+                            crs=src.crs,
+                            transform=transform,
+                            width=width,
+                            height=height,
+                            src_nodata=fill_value,
+                            nodata=fill_value,
+                            resampling=Resampling.average,
+                        )
+                        offset = (0, 0)
+                    profile = {
+                        "width": width,
+                        "height": height,
+                        "crs": src.crs,
+                        "transform": transform,
+                        "nodata": fill_value,
+                    }
+                    with reader as reader_src:
+                        self._write_strips(
+                            reader_src, offset, tmp_path, profile, scale_factor
+                        )
+                # COG CreateCopy reads the temp GTiff block by block, so memory stays bounded
+                rasterio.shutil.copy(
+                    tmp_path,
+                    out_path,
+                    driver="COG",
+                    compress="ZSTD",
+                    predictor="STANDARD",
+                    level=9,
+                    # GDAL's COG default is CUBIC, which overshoots at forest edges (down to
+                    # -28.3 Mg/ha in Brazil's overviews)
+                    overview_resampling="average",
+                    BIGTIFF="IF_SAFER",
+                )
         except Exception:
             if exists(out_path):
                 remove(out_path)
             raise
+        finally:
+            if exists(tmp_path):
+                remove(tmp_path)
 
         return out_path
+
+    @staticmethod
+    def _write_strips(
+        reader, offset: tuple[int, int], tmp_path: str, profile: dict, scale_factor: int
+    ) -> None:
+        """Copy `reader` to a tiled GTiff STRIP_ROWS rows at a time.
+
+        The COG driver has no Create, so rasterio buffers a COG opened for writing in an
+        in-memory dataset -- a full uncompressed copy (1.1GB for Brazil), which with the read
+        array exceeded Jenkins' 2GB limit. A GTiff can be written incrementally instead.
+        """
+        col_off, row_off = offset
+        width, height = profile["width"], profile["height"]
+        with rasterio.open(
+            tmp_path,
+            "w",
+            driver="GTiff",
+            count=1,
+            dtype="int16",
+            tiled=True,
+            blockxsize=512,
+            blockysize=512,
+            compress="ZSTD",
+            zstd_level=1,
+            predictor=2,
+            BIGTIFF="IF_SAFER",
+            **profile,
+        ) as dst:
+            for row in range(0, height, STRIP_ROWS):
+                rows = min(STRIP_ROWS, height - row)
+                data = reader.read(
+                    1, window=Window(col_off, row_off + row, width, rows)
+                )
+                dst.write(
+                    data.astype("int16", copy=False),
+                    1,
+                    window=Window(0, row, width, rows),
+                )
+            dst.scales = (1 / scale_factor,)
+            dst.offsets = (0.0,)
 
     def _get_downsample_factor(self, iso3: str) -> int:
         return self._configuration["downsample_factors"].get(iso3.lower(), 1)

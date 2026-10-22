@@ -25,7 +25,8 @@ product is out of scope).
   countries, downloads/extracts the `cod-ab-global` boundaries once per run, then loops per country
   with explicit try/except isolation (one bad country must not abort the batch).
 - `src/hdx/scraper/ctrees/pipeline.py` — `Pipeline` class: `get_gho_countries()`,
-  `get_country_raster()` (windowed COG read + clip + write), `generate_dataset()` (HDX
+  `get_country_raster()` (windowed COG read + clip, written in 1024-row strips to a temp GTiff
+  then copied to COG to stay under Jenkins' 2GB memory limit, see `0009`), `generate_dataset()` (HDX
   `Dataset`/`Resource` construction).
 - `src/hdx/scraper/ctrees/boundaries.py` — `cod-ab-global` boundary download/extraction and
   per-country bbox lookup (`download_admin1_boundaries()`, `get_country_bbox()`), plus the

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from os.path import join
 from pathlib import Path
 
+import numpy as np
 import pytest
 import rasterio
 from hdx.utilities.loader import load_json
@@ -104,7 +105,9 @@ class TestPipeline:
 
     def test_get_country_raster(self, monkeypatch, configuration, input_dir):
         real_open = rasterio.open
-        bbox, _ = self._patch_source_cog(monkeypatch, input_dir)
+        bbox, src_data = self._patch_source_cog(monkeypatch, input_dir)
+        # 2025 fixture rows -> 5 strips, the last one partial
+        monkeypatch.setattr(pipeline_module, "STRIP_ROWS", 500)
 
         with temp_dir(
             "TestCtreesRaster", delete_on_success=True, delete_on_failure=False
@@ -114,8 +117,7 @@ class TestPipeline:
 
             with real_open(out_path) as out_src:
                 data = out_src.read(1)
-                assert data.shape[0] > 0
-                assert data.shape[1] > 0
+                assert np.array_equal(data, src_data)
                 assert out_src.dtypes[0] == "int16"
                 # raw fixture range is 0-3870 (already x10-scaled, stored undivided)
                 assert data.max() == pytest.approx(3870, rel=0.01)
@@ -162,6 +164,53 @@ class TestPipeline:
                 assert data[0, 1] == -9999
                 expected = src_data[2:4, 2:4].mean()
                 assert data[1, 1] == pytest.approx(expected, abs=1)
+
+    def test_get_country_raster_downsampled_strips_match_single_read(
+        self, monkeypatch, configuration, input_dir
+    ):
+        real_open = rasterio.open
+        bbox, _ = self._patch_source_cog(monkeypatch, input_dir)
+        monkeypatch.setitem(configuration["downsample_factors"], "lbn", 2)
+
+        outputs = []
+        for strip_rows in (100, 10000):
+            monkeypatch.setattr(pipeline_module, "STRIP_ROWS", strip_rows)
+            with temp_dir(
+                "TestCtreesRasterStrips",
+                delete_on_success=True,
+                delete_on_failure=False,
+            ) as tempdir:
+                pipeline = Pipeline(configuration, retriever=None, tempdir=tempdir)
+                out_path = pipeline.get_country_raster("lbn", bbox, 2025)
+                with real_open(out_path) as out_src:
+                    outputs.append(out_src.read(1))
+        # GDAL's average resampler rounds .5 ties differently depending on the read window
+        # (1861 of 969,441 pixels here)
+        diff = np.abs(outputs[0].astype(int) - outputs[1].astype(int))
+        assert diff.max() <= 1
+
+    def test_get_country_raster_downsampled_matches_exact_mean(
+        self, monkeypatch, configuration, input_dir
+    ):
+        real_open = rasterio.open
+        bbox, src_data = self._patch_source_cog(monkeypatch, input_dir)
+        monkeypatch.setitem(configuration["downsample_factors"], "lbn", 2)
+
+        with temp_dir(
+            "TestCtreesRasterExactMean",
+            delete_on_success=True,
+            delete_on_failure=False,
+        ) as tempdir:
+            pipeline = Pipeline(configuration, retriever=None, tempdir=tempdir)
+            out_path = pipeline.get_country_raster("lbn", bbox, 2025)
+            with real_open(out_path) as out_src:
+                data = out_src.read(1)
+
+        height, width = data.shape
+        padded = np.full((height * 2, width * 2), np.nan)
+        padded[: src_data.shape[0], : src_data.shape[1]] = src_data
+        expected = np.nanmean(padded.reshape(height, 2, width, 2), axis=(1, 3))
+        assert np.abs(data - expected).max() <= 0.5
 
     def _patch_now_utc(self, monkeypatch, year):
         monkeypatch.setattr(

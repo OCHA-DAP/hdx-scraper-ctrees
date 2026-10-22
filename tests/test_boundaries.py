@@ -1,3 +1,4 @@
+import json
 from os.path import join
 
 import pytest
@@ -25,6 +26,31 @@ class TestBoundaries:
         boundaries_path = join(input_dir, "admin1.geojson")
         with pytest.raises(ValueError):
             get_country_bbox(boundaries_path, "zzz", layer=None)
+
+    def test_get_country_bbox_lower_case_data_and_null_geometry(self, tmp_path):
+        features = [
+            {"type": "Feature", "properties": {"iso3": "aaa"}, "geometry": None},
+            {
+                "type": "Feature",
+                "properties": {"iso3": "aaa"},
+                "geometry": {"type": "Point", "coordinates": [1.0, 2.0]},
+            },
+        ]
+        boundaries_path = tmp_path / "admin1.geojson"
+        boundaries_path.write_text(
+            json.dumps({"type": "FeatureCollection", "features": features})
+        )
+        assert get_country_bbox(boundaries_path, "AAA", layer=None) == (
+            1.0,
+            2.0,
+            1.0,
+            2.0,
+        )
+
+    def test_get_country_bbox_invalid_iso3(self, input_dir):
+        boundaries_path = join(input_dir, "admin1.geojson")
+        with pytest.raises(ValueError):
+            get_country_bbox(boundaries_path, "C'V", layer=None)
 
     def test_get_fieldmaps_country_bbox(self, configuration, input_dir):
         retriever = Retrieve(

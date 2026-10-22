@@ -8,10 +8,13 @@ Stage 2 capability gap / Stage 3.3).
 """
 
 import logging
+import re
 import zipfile
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
+import pyogrio
 from hdx.api.configuration import Configuration
 from hdx.utilities.retriever import Retrieve
 
@@ -60,12 +63,21 @@ def get_country_bbox(
     against a small synthetic single-layer fixture, since the full ~1GB GDB is impractical to
     commit).
     """
-    gdf = gpd.read_file(boundaries_path, layer=layer)
-    country_gdf = gdf[gdf[ISO3_FIELD].str.upper() == iso3.upper()]
-    if country_gdf.empty:
+    if not re.fullmatch("[A-Za-z]{3}", iso3):
+        raise ValueError(f"Invalid ISO3 code {iso3!r}")
+    # Reading the whole admin1 layer with geopandas peaks at 640MB, read_bounds at 134MB
+    _, bounds = pyogrio.read_bounds(
+        boundaries_path, layer=layer, where=f"{ISO3_FIELD} ILIKE '{iso3}'"
+    )
+    # Features with null geometry have NaN bounds
+    if bounds.shape[1] == 0 or np.isnan(bounds).all():
         raise ValueError(f"No admin1 boundaries found for country {iso3}")
-    minx, miny, maxx, maxy = country_gdf.total_bounds
-    return minx, miny, maxx, maxy
+    return (
+        np.nanmin(bounds[0]),
+        np.nanmin(bounds[1]),
+        np.nanmax(bounds[2]),
+        np.nanmax(bounds[3]),
+    )
 
 
 def get_fieldmaps_country_bbox(
